@@ -17,9 +17,15 @@ pub fn main() !void {
 
     std.debug.print("{d:.4}\n", .{lib.BAR});
     std.debug.print("{d:.4}\n", .{lib.foo(10.0)});
+
+    var x: [10]u8 = undefined;
+    std.mem.copyForwards(u8, &x, "abcdef");
+    lib.baz(&x);
+    std.debug.print("{s}\n", .{x});
 }
 
 const Example = struct {
     BAR: f64,
     foo: *const fn (a: f64) f64,
+    baz: *const fn ([]u8) void,
 };
