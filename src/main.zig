@@ -12,29 +12,16 @@ pub fn main() !void {
     var lib = try std.DynLib.open(path);
     defer lib.close();
 
-    const foo = lib.lookup(*const fn (f64) f64, "foo") orelse {
+    const foo = lib.lookup(*const fn (f32) f32, "foo") orelse {
+        return error.NotFound;
+    };
+    const bar = lib.lookup(*const fn (u32) u32, "bar") orelse {
         return error.NotFound;
     };
 
-    const result = foo(123.4);
-    std.debug.print("{}\n", .{result});
+    const foo_result = foo(45.0);
+    std.debug.print("foo result: {}\n", .{foo_result});
 
-    const baz = lib.lookup(*const fn ([]u8) void, "baz") orelse {
-        return error.NotFound;
-    };
-
-    const string = "abcdefghij";
-    var buffer: [10]u8 = undefined;
-    @memcpy(buffer[0..string.len], string);
-    const slice = buffer[0..string.len];
-
-    std.debug.print("{s}\n", .{slice});
-    baz(slice);
-    std.debug.print("{s}\n", .{slice});
+    const bar_result = bar(45);
+    std.debug.print("bar result: {}\n", .{bar_result});
 }
-
-const Example = struct {
-    BAR: f64,
-    foo: *const fn (a: f64) f64,
-    baz: *const fn ([]u8) void,
-};

@@ -1,12 +1,11 @@
 const std = @import("std");
 
-export const BAR: f64 = 4.1;
-
-export fn foo(x: f64) f64 {
-    return x + 6.7;
+export fn foo(x: f32) f32 {
+    std.debug.print("foo: {}\n", .{x});
+    return x + 10.0;
 }
 
-export fn baz(x: [*:0]u8) void {
-    x[1] += 1;
-    // x.* += 3;
+export fn bar(x: u32) u32 {
+    std.debug.print("bar: {}\n", .{x});
+    return x + 10;
 }
