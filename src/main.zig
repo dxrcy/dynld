@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const DynamicHandler = @import("dynamic.zig").DynamicHandler;
-
 pub fn main() !void {
     var args = std.process.args();
     _ = args.next();
@@ -11,17 +9,28 @@ pub fn main() !void {
         return error.MissingArgument;
     };
 
-    const handler = try DynamicHandler(Example).open(path);
-    defer handler.close() catch unreachable;
-    const lib = handler.content;
+    var lib = try std.DynLib.open(path);
+    defer lib.close();
 
-    std.debug.print("{d:.4}\n", .{lib.BAR});
-    std.debug.print("{d:.4}\n", .{lib.foo(10.0)});
+    const foo = lib.lookup(*const fn (f64) f64, "foo") orelse {
+        return error.NotFound;
+    };
 
-    var x: [10]u8 = undefined;
-    std.mem.copyForwards(u8, &x, "abcdef");
-    lib.baz(&x);
-    std.debug.print("{s}\n", .{x});
+    const result = foo(123.4);
+    std.debug.print("{}\n", .{result});
+
+    const baz = lib.lookup(*const fn ([]u8) void, "baz") orelse {
+        return error.NotFound;
+    };
+
+    const string = "abcdefghij";
+    var buffer: [10]u8 = undefined;
+    @memcpy(buffer[0..string.len], string);
+    const slice = buffer[0..string.len];
+
+    std.debug.print("{s}\n", .{slice});
+    baz(slice);
+    std.debug.print("{s}\n", .{slice});
 }
 
 const Example = struct {
