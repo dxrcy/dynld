@@ -10,6 +10,7 @@ pub fn main() !void {
     defer lib.close();
 
     std.debug.print("pi: {}\n", .{lib.interface.PI.*});
+    std.debug.print("e: {}\n", .{lib.interface.E.*});
 
     const foo_result = lib.interface.foo(45.0);
     std.debug.print("foo result: {}\n", .{foo_result});
@@ -24,6 +25,7 @@ pub fn main() !void {
 
 const Example = struct {
     PI: f64,
+    E: f64 = 2.71828,
     foo: fn (f32) f32,
     bar: fn (u32) u32,
     baz: fn (*const u8, len: usize) void,
@@ -60,14 +62,14 @@ fn Interface(comptime T: type) type {
 
     var fields: [strct.fields.len]Type.StructField = undefined;
     inline for (strct.fields, 0..) |field, i| {
-        comptime assert(field.default_value_ptr == null);
         comptime assert(!field.is_comptime);
 
         fields[i] = Type.StructField{
             .name = field.name,
             .type = InterfaceField(field.type),
+            // FIXME: WRONG TYPE BEHIND OPAQUE PTR
+            .default_value_ptr = field.default_value_ptr,
 
-            .default_value_ptr = null,
             .is_comptime = false,
             .alignment = @alignOf(InterfaceField(field.type)),
         };
@@ -109,13 +111,26 @@ fn InterfaceField(comptime T: type) type {
     }
 }
 
-fn loadSymbols(comptime T: type, dynlib: *std.DynLib) !T {
+fn loadSymbols(comptime T: type, dynlib: *DynLib) !T {
     var content: T = undefined;
     inline for (@typeInfo(T).@"struct".fields) |field| {
-        @field(content, field.name) =
-            dynlib.lookup(field.type, field.name) orelse {
-                return error.SymbolNotFound;
-            };
+        @field(content, field.name) = try loadSymbol(
+            field.type,
+            field.name,
+            field.defaultValue(),
+            dynlib,
+        );
     }
     return content;
+}
+
+fn loadSymbol(
+    comptime T: type,
+    comptime name: [:0]const u8,
+    comptime default: ?T,
+    dynlib: *DynLib,
+) !T {
+    return dynlib.lookup(T, name) orelse
+        default orelse
+        error.SymbolNotFound;
 }
