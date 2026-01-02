@@ -1,14 +1,14 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const Type = std.builtin.Type;
-const CallingConvention = std.builtin.CallingConvention;
+
+const CALLING_CONVENTION = std.builtin.CallingConvention.c;
 
 pub fn FieldFn(comptime T: type) type {
     var func = @typeInfo(T).@"fn";
     assert(func.calling_convention == .auto);
-    func.calling_convention = .c;
+    func.calling_convention = CALLING_CONVENTION;
 
-    const field = *const @Type(Type{ .@"fn" = func });
+    const field = *const @Type(.{ .@"fn" = func });
     checkSymbolField(field);
     return field;
 }
@@ -37,8 +37,11 @@ pub fn DynLib(comptime T: type) type {
     };
 }
 
+/// Currently very conservative in which types are supported.
 fn checkSymbolsStruct(comptime T: type) void {
     const strct = @typeInfo(T).@"struct";
+
+    // TODO: These can surely be relaxed
     comptime assert(strct.layout == .auto);
     comptime assert(strct.backing_integer == null);
     comptime assert(strct.decls.len == 0);
@@ -50,20 +53,64 @@ fn checkSymbolsStruct(comptime T: type) void {
     }
 }
 
+/// Currently very conservative in which types are supported.
 fn checkSymbolField(comptime T: type) void {
     switch (@typeInfo(T)) {
-        .@"fn" => |func| {
-            comptime assert(!func.is_generic);
-            comptime assert(!func.is_var_args);
-            comptime assert(func.calling_convention.eql(CallingConvention.c));
-            comptime assert(func.return_type != null);
-            inline for (func.params) |param| {
-                comptime assert(!param.is_generic);
-                comptime assert(!param.is_noalias);
+        // I don't think it is possible or sensible to support these.
+        .type,
+        .void,
+        .noreturn,
+        .comptime_float,
+        .comptime_int,
+        .undefined,
+        .null,
+        .error_set,
+        .@"fn",
+        .@"opaque",
+        .frame,
+        .@"anyframe",
+        .enum_literal,
+        => unreachable,
+
+        // These may be supportable? Some with difficulty, I am sure.
+        .array,
+        .@"struct",
+        .optional,
+        .@"enum",
+        .error_union,
+        .@"union",
+        .vector,
+        => unreachable,
+
+        // Trivially copyable.
+        // `usize` and isize` *are* sensible since the calling convention is
+        // already platform-dependant.
+        .bool,
+        .int,
+        .float,
+        => {},
+
+        .pointer => |pointer| {
+            switch (@typeInfo(pointer.child)) {
+                .@"fn" => |func| {
+                    // TODO: Some of these may be relaxed?
+                    comptime assert(!func.is_generic);
+                    comptime assert(!func.is_var_args);
+                    comptime assert(func.calling_convention.eql(CALLING_CONVENTION));
+                    // Redundant: Only `null` if function is generic
+                    comptime assert(func.return_type != null);
+
+                    inline for (func.params) |param| {
+                        // TODO: Some of these may be relaxed?
+                        comptime assert(!param.is_generic);
+                        comptime assert(!param.is_noalias);
+                    }
+                },
+
+                // TODO:
+                else => unreachable,
             }
         },
-
-        else => {},
     }
 }
 
@@ -98,28 +145,15 @@ fn loadSymbol(
 }
 
 fn SymbolPtr(comptime T: type) type {
-    if (unwrapFnPtr(T)) |_| {
-        return T;
-    }
-    return *const T;
+    return if (@typeInfo(T) == .pointer)
+        T
+    else
+        *const T;
 }
 
 fn fromSymbolPtr(comptime T: type, value: SymbolPtr(T)) T {
-    if (unwrapFnPtr(T)) |_| {
-        return value;
-    }
-    return value.*;
-}
-
-fn unwrapFnPtr(comptime T: type) ?type {
-    switch (@typeInfo(T)) {
-        .pointer => |pointer| switch (@typeInfo(pointer.child)) {
-            .@"fn" => {
-                return pointer.child;
-            },
-            else => {},
-        },
-        else => {},
-    }
-    return null;
+    return if (@typeInfo(T) == .pointer)
+        value
+    else
+        value.*;
 }
