@@ -11,29 +11,29 @@ pub fn main() !void {
     defer lib.close();
 
     std.debug.print("----\n", .{});
-    inline for (std.meta.fields(@TypeOf(lib.interface))) |field| {
+    inline for (std.meta.fields(@TypeOf(lib.symbols))) |field| {
         std.debug.print("field {s}: {} = {any}\n", .{
             field.name,
             field.type,
-            @field(lib.interface, field.name),
+            @field(lib.symbols, field.name),
         });
     }
 
     std.debug.print("----\n", .{});
-    std.debug.print("pi: {}\n", .{lib.interface.PI});
-    std.debug.print("e: {}\n", .{lib.interface.E});
+    std.debug.print("pi: {}\n", .{lib.symbols.PI});
+    std.debug.print("e: {}\n", .{lib.symbols.E});
 
     std.debug.print("----\n", .{});
-    const foo_result = lib.interface.foo(45.0);
+    const foo_result = lib.symbols.foo(45.0);
     std.debug.print("foo result: {}\n", .{foo_result});
 
     std.debug.print("----\n", .{});
-    const bar_result = lib.interface.bar(45);
+    const bar_result = lib.symbols.bar(45);
     std.debug.print("bar result: {}\n", .{bar_result});
 
     std.debug.print("----\n", .{});
     const string = "abcdef";
-    const baz_result = lib.interface.baz(@ptrCast(string), string.len);
+    const baz_result = lib.symbols.baz(@ptrCast(string), string.len);
     std.debug.print("baz result: {}\n", .{baz_result});
 }
 

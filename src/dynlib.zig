@@ -9,25 +9,25 @@ pub fn FieldFn(comptime T: type) type {
     func.calling_convention = .c;
 
     const field = *const @Type(Type{ .@"fn" = func });
-    checkInterfaceField(field);
+    checkSymbolField(field);
     return field;
 }
 
 pub fn DynLib(comptime T: type) type {
-    checkInterface(T);
+    checkSymbolsStruct(T);
 
     return struct {
         const Self = @This();
 
         handle: std.DynLib,
-        interface: T,
+        symbols: T,
 
         pub fn load(path: []const u8) !Self {
             var handle = try std.DynLib.open(path);
-            const interface = try loadFieldSymbols(T, &handle);
+            const symbols = try loadFieldSymbols(T, &handle);
             return Self{
                 .handle = handle,
-                .interface = interface,
+                .symbols = symbols,
             };
         }
 
@@ -37,7 +37,7 @@ pub fn DynLib(comptime T: type) type {
     };
 }
 
-fn checkInterface(comptime T: type) void {
+fn checkSymbolsStruct(comptime T: type) void {
     const strct = @typeInfo(T).@"struct";
     comptime assert(strct.layout == .auto);
     comptime assert(strct.backing_integer == null);
@@ -46,11 +46,11 @@ fn checkInterface(comptime T: type) void {
 
     inline for (strct.fields) |field| {
         comptime assert(!field.is_comptime);
-        checkInterfaceField(field.type);
+        checkSymbolField(field.type);
     }
 }
 
-fn checkInterfaceField(comptime T: type) void {
+fn checkSymbolField(comptime T: type) void {
     switch (@typeInfo(T)) {
         .@"fn" => |func| {
             comptime assert(!func.is_generic);
@@ -68,7 +68,7 @@ fn checkInterfaceField(comptime T: type) void {
 }
 
 fn loadFieldSymbols(comptime T: type, handle: *std.DynLib) !T {
-    checkInterface(T);
+    checkSymbolsStruct(T);
 
     var content: T = undefined;
     inline for (@typeInfo(T).@"struct".fields) |field| {
@@ -88,7 +88,7 @@ fn loadSymbol(
     comptime default: ?T,
     handle: *std.DynLib,
 ) !T {
-    checkInterfaceField(T);
+    checkSymbolField(T);
 
     if (handle.lookup(SymbolPtr(T), name)) |symbol| {
         return fromSymbolPtr(T, symbol);
