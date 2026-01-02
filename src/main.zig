@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const DynLib = std.DynLib;
 const Type = std.builtin.Type;
+const CallingConvention = std.builtin.CallingConvention;
 
 pub fn main() !void {
     const path = "./libexample.so";
@@ -26,10 +27,15 @@ pub fn main() !void {
 const Example = struct {
     PI: f64,
     E: f64 = 2.71828,
-    foo: fn (f32) f32,
-    bar: fn (u32) u32,
-    baz: fn (*const u8, len: usize) void,
+    foo: fn (f32) callconv(.c) f32,
+    bar: fn (u32) callconv(.c) u32 = barDefault,
+    baz: fn (*const u8, len: usize) callconv(.c) void,
 };
+
+fn barDefault(x: u32) callconv(.c) u32 {
+    std.debug.print("barDefault: {}\n", .{x});
+    return x + 20;
+}
 
 pub fn Lib(comptime T: type) type {
     return struct {
@@ -40,7 +46,7 @@ pub fn Lib(comptime T: type) type {
 
         pub fn load(path: []const u8) !Self {
             var dynlib = try DynLib.open(path);
-            const interface = try loadSymbols(Interface(T), &dynlib);
+            const interface = try loadFieldSymbols(Interface(T), &dynlib);
             return Self{
                 .dynlib = dynlib,
                 .interface = interface,
@@ -64,11 +70,18 @@ fn Interface(comptime T: type) type {
     inline for (strct.fields, 0..) |field, i| {
         comptime assert(!field.is_comptime);
 
+        const default_value_ptr: ?*const InterfaceField(field.type) =
+            if (field.defaultValue()) |default|
+                &toInterfaceField(field.type, default)
+            else
+                null;
+
+        const opaque_ptr: ?*const anyopaque = @ptrCast(default_value_ptr);
+
         fields[i] = Type.StructField{
             .name = field.name,
             .type = InterfaceField(field.type),
-            // FIXME: WRONG TYPE BEHIND OPAQUE PTR
-            .default_value_ptr = field.default_value_ptr,
+            .default_value_ptr = opaque_ptr,
 
             .is_comptime = false,
             .alignment = @alignOf(InterfaceField(field.type)),
@@ -92,26 +105,23 @@ fn InterfaceField(comptime T: type) type {
         .@"fn" => |func| {
             comptime assert(!func.is_generic);
             comptime assert(!func.is_var_args);
-            comptime assert(func.calling_convention == .auto);
+            comptime assert(func.calling_convention.eql(CallingConvention.c));
             comptime assert(func.return_type != null);
-
-            return *const @Type(Type{
-                .@"fn" = .{
-                    .return_type = func.return_type,
-                    .params = func.params,
-
-                    .calling_convention = .c,
-                    .is_generic = false,
-                    .is_var_args = false,
-                },
-            });
+            inline for (func.params) |param| {
+                comptime assert(!param.is_generic);
+                comptime assert(!param.is_noalias);
+            }
         },
-
-        else => return *const T,
+        else => {},
     }
+    return *const T;
 }
 
-fn loadSymbols(comptime T: type, dynlib: *DynLib) !T {
+fn toInterfaceField(comptime T: type, comptime field: T) InterfaceField(T) {
+    return &field;
+}
+
+fn loadFieldSymbols(comptime T: type, dynlib: *DynLib) !T {
     var content: T = undefined;
     inline for (@typeInfo(T).@"struct".fields) |field| {
         @field(content, field.name) = try loadSymbol(
