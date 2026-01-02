@@ -10,8 +10,16 @@ pub fn main() !void {
     var lib = try Lib(Example).load(path);
     defer lib.close();
 
-    std.debug.print("pi: {}\n", .{lib.interface.PI.*});
-    std.debug.print("e: {}\n", .{lib.interface.E.*});
+    inline for (std.meta.fields(@TypeOf(lib.interface))) |field| {
+        std.debug.print("field {s}: {} = {any}\n", .{
+            field.name,
+            field.type,
+            @field(lib.interface, field.name),
+        });
+    }
+
+    std.debug.print("pi: {}\n", .{lib.interface.PI});
+    std.debug.print("e: {}\n", .{lib.interface.E});
 
     const foo_result = lib.interface.foo(45.0);
     std.debug.print("foo result: {}\n", .{foo_result});
@@ -111,14 +119,58 @@ fn InterfaceField(comptime T: type) type {
                 comptime assert(!param.is_generic);
                 comptime assert(!param.is_noalias);
             }
+
+            return *const T;
+        },
+
+        else => {
+            return T;
+        },
+    }
+}
+
+fn toInterfaceField(comptime T: type, comptime field: T) InterfaceField(T) {
+    switch (@typeInfo(T)) {
+        .@"fn" => {
+            return &field;
+        },
+
+        else => {
+            return field;
+        },
+    }
+}
+
+fn FieldPtr(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        .pointer => |pointer| {
+            switch (@typeInfo(pointer.child)) {
+                .@"fn" => |func| {
+                    _ = func;
+                    return T;
+                },
+                else => {},
+            }
         },
         else => {},
     }
     return *const T;
 }
 
-fn toInterfaceField(comptime T: type, comptime field: T) InterfaceField(T) {
-    return &field;
+fn fromFieldPtr(comptime T: type, value: FieldPtr(T)) T {
+    switch (@typeInfo(T)) {
+        .pointer => |pointer| {
+            switch (@typeInfo(pointer.child)) {
+                .@"fn" => |func| {
+                    _ = func;
+                    return value;
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
+    return value.*;
 }
 
 fn loadFieldSymbols(comptime T: type, dynlib: *DynLib) !T {
@@ -140,7 +192,10 @@ fn loadSymbol(
     comptime default: ?T,
     dynlib: *DynLib,
 ) !T {
-    return dynlib.lookup(T, name) orelse
-        default orelse
+    if (dynlib.lookup(FieldPtr(T), name)) |symbol| {
+        return fromFieldPtr(T, symbol);
+    }
+
+    return default orelse
         error.SymbolNotFound;
 }
