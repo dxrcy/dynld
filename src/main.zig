@@ -1,8 +1,8 @@
 const std = @import("std");
 
-const dyld = @import("dyld.zig");
-const DynLib = dyld.DynLib;
-const FieldFn = dyld.FieldFn;
+const dynld = @import("dynld.zig");
+const DynLib = dynld.DynLib;
+const FieldFn = dynld.FieldFn;
 
 pub fn main() !void {
     const path = "./libexample.so";
