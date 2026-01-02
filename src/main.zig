@@ -35,10 +35,20 @@ pub fn main() !void {
 const Example = struct {
     PI: f64,
     E: f64 = 2.71828,
-    foo: fn (f32) callconv(.c) f32,
-    bar: fn (u32) callconv(.c) u32 = barDefault,
-    baz: fn (*const u8, len: usize) callconv(.c) void,
+    foo: FieldFn(fn (f32) f32),
+    bar: FieldFn(fn (u32) u32) = barDefault,
+    baz: FieldFn(fn (*const u8, len: usize) void),
 };
+
+fn FieldFn(comptime T: type) type {
+    var func = @typeInfo(T).@"fn";
+    assert(func.calling_convention == .auto);
+    func.calling_convention = .c;
+
+    const field = *const @Type(Type{ .@"fn" = func });
+    checkInterfaceField(field);
+    return field;
+}
 
 fn barDefault(x: u32) callconv(.c) u32 {
     std.debug.print("barDefault: {}\n", .{x});
@@ -46,15 +56,17 @@ fn barDefault(x: u32) callconv(.c) u32 {
 }
 
 pub fn Lib(comptime T: type) type {
+    checkInterface(T);
+
     return struct {
         const Self = @This();
 
         dynlib: DynLib,
-        interface: Interface(T),
+        interface: T,
 
         pub fn load(path: []const u8) !Self {
             var dynlib = try DynLib.open(path);
-            const interface = try loadFieldSymbols(Interface(T), &dynlib);
+            const interface = try loadFieldSymbols(T, &dynlib);
             return Self{
                 .dynlib = dynlib,
                 .interface = interface,
@@ -67,48 +79,20 @@ pub fn Lib(comptime T: type) type {
     };
 }
 
-fn Interface(comptime T: type) type {
+fn checkInterface(comptime T: type) void {
     const strct = @typeInfo(T).@"struct";
     comptime assert(strct.layout == .auto);
     comptime assert(strct.backing_integer == null);
     comptime assert(strct.decls.len == 0);
     comptime assert(!strct.is_tuple);
 
-    var fields: [strct.fields.len]Type.StructField = undefined;
-    inline for (strct.fields, 0..) |field, i| {
+    inline for (strct.fields) |field| {
         comptime assert(!field.is_comptime);
-
-        const default_value_ptr: ?*const InterfaceField(field.type) =
-            if (field.defaultValue()) |default|
-                &toInterfaceField(field.type, default)
-            else
-                null;
-
-        const opaque_ptr: ?*const anyopaque = @ptrCast(default_value_ptr);
-
-        fields[i] = Type.StructField{
-            .name = field.name,
-            .type = InterfaceField(field.type),
-            .default_value_ptr = opaque_ptr,
-
-            .is_comptime = false,
-            .alignment = @alignOf(InterfaceField(field.type)),
-        };
+        checkInterfaceField(field.type);
     }
-
-    return @Type(Type{
-        .@"struct" = .{
-            .fields = &fields,
-
-            .layout = .auto,
-            .backing_integer = null,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
 }
 
-fn InterfaceField(comptime T: type) type {
+fn checkInterfaceField(comptime T: type) void {
     switch (@typeInfo(T)) {
         .@"fn" => |func| {
             comptime assert(!func.is_generic);
@@ -119,61 +103,15 @@ fn InterfaceField(comptime T: type) type {
                 comptime assert(!param.is_generic);
                 comptime assert(!param.is_noalias);
             }
-
-            return *const T;
         },
 
-        else => {
-            return T;
-        },
-    }
-}
-
-fn toInterfaceField(comptime T: type, comptime field: T) InterfaceField(T) {
-    switch (@typeInfo(T)) {
-        .@"fn" => {
-            return &field;
-        },
-
-        else => {
-            return field;
-        },
-    }
-}
-
-fn FieldPtr(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .pointer => |pointer| {
-            switch (@typeInfo(pointer.child)) {
-                .@"fn" => |func| {
-                    _ = func;
-                    return T;
-                },
-                else => {},
-            }
-        },
         else => {},
     }
-    return *const T;
-}
-
-fn fromFieldPtr(comptime T: type, value: FieldPtr(T)) T {
-    switch (@typeInfo(T)) {
-        .pointer => |pointer| {
-            switch (@typeInfo(pointer.child)) {
-                .@"fn" => |func| {
-                    _ = func;
-                    return value;
-                },
-                else => {},
-            }
-        },
-        else => {},
-    }
-    return value.*;
 }
 
 fn loadFieldSymbols(comptime T: type, dynlib: *DynLib) !T {
+    checkInterface(T);
+
     var content: T = undefined;
     inline for (@typeInfo(T).@"struct".fields) |field| {
         @field(content, field.name) = try loadSymbol(
@@ -192,10 +130,38 @@ fn loadSymbol(
     comptime default: ?T,
     dynlib: *DynLib,
 ) !T {
-    if (dynlib.lookup(FieldPtr(T), name)) |symbol| {
-        return fromFieldPtr(T, symbol);
-    }
+    checkInterfaceField(T);
 
+    if (dynlib.lookup(SymbolPtr(T), name)) |symbol| {
+        return fromSymbolPtr(T, symbol);
+    }
     return default orelse
         error.SymbolNotFound;
+}
+
+fn SymbolPtr(comptime T: type) type {
+    if (unwrapFnPtr(T)) |_| {
+        return T;
+    }
+    return *const T;
+}
+
+fn fromSymbolPtr(comptime T: type, value: SymbolPtr(T)) T {
+    if (unwrapFnPtr(T)) |_| {
+        return value;
+    }
+    return value.*;
+}
+
+fn unwrapFnPtr(comptime T: type) ?type {
+    switch (@typeInfo(T)) {
+        .pointer => |pointer| switch (@typeInfo(pointer.child)) {
+            .@"fn" => {
+                return pointer.child;
+            },
+            else => {},
+        },
+        else => {},
+    }
+    return null;
 }
